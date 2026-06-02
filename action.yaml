@@ -1,13 +1,103 @@
 name: Laravel Cloud Deploy
-author: nhedger
-description: Trigger a Laravel Cloud deployment
+author: deriegle
+description: Trigger a Laravel Cloud deployment and wait for it to finish
 inputs:
   webhook:
-    description: The webhook URL to trigger the deployment
+    description: The deploy hook URL to trigger the deployment
     required: true
+  api-token:
+    description: Laravel Cloud API token, used to poll deployment status
+    required: true
+  environment-id:
+    description: Laravel Cloud environment ID to poll
+    required: true
+  commit:
+    description: Commit SHA to match the deployment against when waiting
+    required: false
+    default: ${{ github.sha }}
+  timeout:
+    description: Maximum number of seconds to wait for the deployment to finish
+    required: false
+    default: "180"
+  interval:
+    description: Number of seconds between deployment status polls
+    required: false
+    default: "10"
 runs:
   using: composite
   steps:
-    - run: |
-        curl --silent -X POST -H "Accept: application/json" -H "Content-Type: application/json" "${{ inputs.webhook }}" > /dev/null
+    - name: Trigger deployment
       shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook }}
+      run: |
+        set -euo pipefail
+
+        echo "Triggering Laravel Cloud deploy hook..."
+
+        curl --silent --show-error --fail-with-body \
+          --retry 3 --retry-delay 1 --retry-connrefused \
+          --max-time 10 \
+          -X POST \
+          -H "Accept: application/json" \
+          -H "Content-Type: application/json" \
+          "$WEBHOOK_URL" > /dev/null
+
+        echo "Deploy hook accepted."
+    - name: Wait for deployment to finish
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        COMMIT_SHA: ${{ inputs.commit }}
+        ENVIRONMENT_ID: ${{ inputs.environment-id }}
+        INTERVAL: ${{ inputs.interval }}
+        TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+
+        success_status="deployment.succeeded"
+        failure_statuses="build.failed deployment.failed failed cancelled"
+        short_sha="${COMMIT:0:8}"
+        response="${RUNNER_TEMP:-/tmp}/laravel-cloud-deployment.json"
+        endpoint="https://cloud.laravel.com/api/environments/${ENVIRONMENT_ID}/deployments"
+        deadline=$(( $(date +%s) + TIMEOUT ))
+
+        echo "Waiting for deployment of ${short_sha} on environment ${ENVIRONMENT_ID} (timeout ${TIMEOUT}s)..."
+
+        while [ "$(date +%s)" -lt "$deadline" ]; do
+          http_code=$(curl --silent --show-error \
+            --max-time 10 \
+            -o "$response" \
+            -w '%{http_code}' \
+            -H "Accept: application/json" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            --get --data-urlencode "filter[commit_hash]=${COMMIT}" \
+            "$endpoint") || http_code="000"
+
+          if [ "${http_code:0:1}" != "2" ]; then
+            echo "::warning::API request failed (HTTP ${http_code}); retrying in ${INTERVAL}s..."
+            sleep "$INTERVAL"
+            continue
+          fi
+
+          status=$(jq -r '.data[0].attributes.status // empty' "$response")
+          now=$(date +%H:%M:%S)
+
+          if [ -z "$status" ]; then
+            echo "[${now}] No deployment for ${short_sha} yet; retrying..."
+          elif [ "$status" = "$success_status" ]; then
+            echo "Deployment succeeded."
+            exit 0
+          elif printf '%s\n' $failure_statuses | grep -qx "$status"; then
+            reason=$(jq -r '.data[0].attributes.failure_reason // "no reason given"' "$response")
+            echo "::error::Deployment finished with status '${status}': ${reason}"
+            exit 1
+          else
+            echo "[${now}] Status: ${status}"
+          fi
+
+          sleep "$INTERVAL"
+        done
+
+        echo "::error::Timed out after ${TIMEOUT}s waiting for deployment to finish."
+        exit 1
