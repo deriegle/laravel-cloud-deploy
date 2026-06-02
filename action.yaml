@@ -1,4 +1,4 @@
-name: Laravel Cloud Deploy
+name: Laravel Cloud Deploy and Verify
 author: deriegle
 description: Trigger a Laravel Cloud deployment and wait for it to finish
 inputs:
