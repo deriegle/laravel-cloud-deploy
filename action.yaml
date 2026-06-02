@@ -1,6 +1,9 @@
 name: Laravel Cloud Deploy and Verify
 author: deriegle
 description: Trigger a Laravel Cloud deployment and wait for it to finish
+branding:
+  icon: upload-cloud
+  color: gray-dark
 inputs:
   webhook:
     description: The deploy hook URL to trigger the deployment
