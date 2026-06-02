@@ -60,7 +60,7 @@ runs:
 
         success_status="deployment.succeeded"
         failure_statuses="build.failed deployment.failed failed cancelled"
-        short_sha="${COMMIT:0:8}"
+        short_sha="${COMMIT_SHA:0:8}"
         response="${RUNNER_TEMP:-/tmp}/laravel-cloud-deployment.json"
         endpoint="https://cloud.laravel.com/api/environments/${ENVIRONMENT_ID}/deployments"
         deadline=$(( $(date +%s) + TIMEOUT ))
@@ -74,7 +74,7 @@ runs:
             -w '%{http_code}' \
             -H "Accept: application/json" \
             -H "Authorization: Bearer ${API_TOKEN}" \
-            --get --data-urlencode "filter[commit_hash]=${COMMIT}" \
+            --get --data-urlencode "filter[commit_hash]=${COMMIT_SHA}" \
             "$endpoint") || http_code="000"
 
           if [ "${http_code:0:1}" != "2" ]; then
