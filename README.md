@@ -1,4 +1,4 @@
-# Laravel Cloud Deploy
+# Laravel Cloud Deploy and Verify
 
 This GitHub Action triggers a deployment on [Laravel Cloud](https://laravel.cloud) and waits for it to finish.
 
